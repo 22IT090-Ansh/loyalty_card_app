@@ -1,10 +1,5 @@
-// GENERATED CODE - DO NOT MODIFY BY HAND
 
 part of 'loyalty_card.dart';
-
-// **************************************************************************
-// TypeAdapterGenerator
-// **************************************************************************
 
 class LoyaltyCardAdapter extends TypeAdapter<LoyaltyCard> {
   @override
