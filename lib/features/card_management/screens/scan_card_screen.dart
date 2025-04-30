@@ -6,120 +6,77 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 class ScanCardScreen extends StatefulWidget {
-  const ScanCardScreen({super.key});
+  const ScanCardScreen({Key? key}) : super(key: key);
 
   @override
   State<ScanCardScreen> createState() => _ScanCardScreenState();
 }
 
 class _ScanCardScreenState extends State<ScanCardScreen> {
-  MobileScannerController? controller;
-  bool isStarted = false;
-  bool isPermissionDenied = false;
-  String? errorMessage;
+  bool _isPermissionGranted = false;
+  bool _isInitialized = false;
+  String? _errorMessage;
+  MobileScannerController? _controller;
 
   @override
   void initState() {
     super.initState();
-    _checkPermissionAndInitialize();
-  }
-
-  Future<void> _checkPermissionAndInitialize() async {
-    try {
-      if (kIsWeb) {
-        // Skip permission check on web and directly initialize camera
-        await _initializeCamera();
-      } else {
-        final status = await Permission.camera.status;
-        debugPrint('Camera permission status: $status');
-
-        if (status.isGranted) {
-          await _initializeCamera();
-        } else {
-          final result = await Permission.camera.request();
-          debugPrint('Camera permission request result: $result');
-          
-          if (result.isGranted) {
-            await _initializeCamera();
-          } else {
-            if (mounted) {
-              setState(() {
-                isPermissionDenied = true;
-              });
-            }
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Error checking permission: $e');
-      if (mounted) {
-        setState(() {
-          errorMessage = 'Failed to check camera permission: $e';
-        });
-      }
-    }
+    _initializeCamera();
   }
 
   Future<void> _initializeCamera() async {
     try {
-      debugPrint('Initializing camera...');
-      controller = MobileScannerController(
-        facing: CameraFacing.back,
-        torchEnabled: false,
-        formats: [BarcodeFormat.all],
-      );
-      
+      // For web, skip permission check and directly initialize camera
       if (kIsWeb) {
-        // For web, we don't need to explicitly start the controller
+        _controller = MobileScannerController(
+          facing: CameraFacing.back,
+          torchEnabled: false,
+          formats: [BarcodeFormat.qrCode, BarcodeFormat.ean13],
+        );
         setState(() {
-          isStarted = true;
+          _isInitialized = true;
+          _isPermissionGranted = true;
+          _errorMessage = null;
+        });
+        return;
+      }
+
+      // For mobile platforms, check permissions
+      final status = await Permission.camera.request();
+      setState(() {
+        _isPermissionGranted = status == PermissionStatus.granted;
+      });
+
+      if (_isPermissionGranted) {
+        _controller = MobileScannerController(
+          facing: CameraFacing.back,
+          torchEnabled: false,
+          formats: [BarcodeFormat.qrCode, BarcodeFormat.ean13],
+        );
+        
+        setState(() {
+          _isInitialized = true;
+          _errorMessage = null;
         });
       } else {
-        await controller?.start();
-        debugPrint('Camera started successfully');
-        
-        if (mounted) {
-          setState(() {
-            isStarted = true;
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('Error initializing camera: $e');
-      if (mounted) {
         setState(() {
-          errorMessage = kIsWeb 
-            ? 'Please make sure you\'ve allowed camera access in your browser settings.'
-            : 'Failed to initialize camera: $e';
+          _errorMessage = 'Camera permission is required to scan cards';
         });
       }
+    } catch (e) {
+      setState(() {
+        _errorMessage = kIsWeb 
+          ? 'Please make sure you\'ve allowed camera access in your browser settings.'
+          : 'Error initializing camera: \$e';
+      });
+      debugPrint('Camera initialization error: \$e');
     }
-  }
-
-  Future<void> _openAppSettings() async {
-    await openAppSettings();
   }
 
   @override
   void dispose() {
-    controller?.dispose();
+    _controller?.dispose();
     super.dispose();
-  }
-
-  void _onDetect(BarcodeCapture capture) {
-    final List<Barcode> barcodes = capture.barcodes;
-    for (final barcode in barcodes) {
-      final String? code = barcode.rawValue;
-      if (code != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => AddCardScreen(scannedBarcode: code),
-          ),
-        );
-        break;
-      }
-    }
   }
 
   @override
@@ -128,192 +85,129 @@ class _ScanCardScreenState extends State<ScanCardScreen> {
       appBar: AppBar(
         title: const Text('Scan Card'),
         actions: [
-          if (isStarted && controller != null && !kIsWeb)
+          if (_isInitialized && _controller != null && !kIsWeb)
             IconButton(
-              icon: ValueListenableBuilder(
-                valueListenable: controller!.torchState,
-                builder: (context, state, child) {
-                  switch (state) {
-                    case TorchState.off:
-                      return const Icon(Icons.flash_off);
-                    case TorchState.on:
-                      return const Icon(Icons.flash_on);
-                  }
-                },
-              ),
-              onPressed: () => controller?.toggleTorch(),
-            ),
-          if (controller != null && !kIsWeb)
-            IconButton(
-              icon: ValueListenableBuilder(
-                valueListenable: controller!.cameraFacingState,
-                builder: (context, state, child) {
-                  switch (state) {
-                    case CameraFacing.front:
-                      return const Icon(Icons.camera_front);
-                    case CameraFacing.back:
-                      return const Icon(Icons.camera_rear);
-                  }
-                },
-              ),
-              onPressed: () => controller?.switchCamera(),
+              icon: const Icon(Icons.flash_on),
+              onPressed: () => _controller?.toggleTorch(),
             ),
         ],
       ),
-      body: errorMessage != null
-          ? Center(
+      body: Builder(
+        builder: (context) {
+          if (_errorMessage != null) {
+            return Center(
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
-                    Icons.error_outline,
-                    size: 64,
-                    color: Colors.red,
+                  Text(
+                    _errorMessage!,
+                    style: const TextStyle(fontSize: 18),
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
-                  Text(
-                    'Camera Error',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32),
-                    child: Text(
-                      errorMessage!,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
                   ElevatedButton(
-                    onPressed: _checkPermissionAndInitialize,
+                    onPressed: _initializeCamera,
                     child: const Text('Try Again'),
                   ),
+                  if (kIsWeb) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Note: Make sure to allow camera access in your browser settings.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ],
                 ],
               ),
-            )
-          : isPermissionDenied
-              ? Center(
+            );
+          }
+
+          if (!_isInitialized || _controller == null) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
+
+          return Stack(
+            children: [
+              MobileScanner(
+                controller: _controller!,
+                onDetect: (capture) {
+                  debugPrint('Barcode detected!');
+                  final List<Barcode> barcodes = capture.barcodes;
+                  for (final barcode in barcodes) {
+                    debugPrint('Barcode value: \${barcode.rawValue}');
+                    if (barcode.rawValue != null) {
+                      Navigator.pop(context, barcode.rawValue);
+                      break;
+                    }
+                  }
+                },
+                errorBuilder: (context, error, child) {
+                  debugPrint('Mobile scanner error: \$error');
+                  return Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Error: \$error',
+                          style: const TextStyle(color: Colors.red),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _initializeCamera,
+                          child: const Text('Try Again'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: Colors.green.withOpacity(0.5),
+                      width: 2,
+                    ),
+                  ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(
-                        Icons.no_photography_outlined,
-                        size: 64,
-                        color: Colors.grey,
+                      Container(
+                        margin: const EdgeInsets.all(40),
+                        height: 200,
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Colors.white,
+                            width: 2,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      const SizedBox(height: 16),
                       const Text(
-                        'Camera Permission Required',
+                        'Position the barcode within the frame',
                         style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 16,
+                          shadows: [
+                            Shadow(
+                              offset: Offset(1.0, 1.0),
+                              blurRadius: 3.0,
+                              color: Color.fromARGB(255, 0, 0, 0),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 32),
-                        child: Text(
-                          'Please grant camera permission to scan loyalty cards',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: _openAppSettings,
-                        child: const Text('Open Settings'),
                       ),
                     ],
                   ),
-                )
-              : isStarted && controller != null
-                  ? Stack(
-                      children: [
-                        MobileScanner(
-                          controller: controller!,
-                          onDetect: _onDetect,
-                        ),
-                        Positioned.fill(
-                          child: CustomPaint(
-                            painter: ScannerOverlayPainter(),
-                          ),
-                        ),
-                        const Positioned(
-                          bottom: 40,
-                          left: 0,
-                          right: 0,
-                          child: Text(
-                            'Position the barcode within the frame',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  : const Center(
-                      child: CircularProgressIndicator(),
-                    ),
-    );
-  }
-}
-
-class ScannerOverlayPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black54
-      ..style = PaintingStyle.fill;
-
-    final scanAreaSize = size.width * 0.7;
-    final scanAreaLeft = (size.width - scanAreaSize) / 2;
-    final scanAreaTop = (size.height - scanAreaSize) / 2;
-
-    // Draw semi-transparent overlay
-    canvas.drawPath(
-      Path.combine(
-        PathOperation.difference,
-        Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height)),
-        Path()
-          ..addRRect(
-            RRect.fromRectAndRadius(
-              Rect.fromLTWH(
-                scanAreaLeft,
-                scanAreaTop,
-                scanAreaSize,
-                scanAreaSize,
+                ),
               ),
-              const Radius.circular(12),
-            ),
-          ),
+            ],
+          );
+        },
       ),
-      paint,
-    );
-
-    // Draw scanning area border
-    final borderPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          scanAreaLeft,
-          scanAreaTop,
-          scanAreaSize,
-          scanAreaSize,
-        ),
-        const Radius.circular(12),
-      ),
-      borderPaint,
     );
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 } 

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:loyalty_card_app/core/services/local_storage_service.dart';
 import 'package:loyalty_card_app/core/services/notification_service.dart';
+import 'package:loyalty_card_app/features/auth/screens/login_screen.dart';
+import 'package:loyalty_card_app/features/auth/screens/signup_screen.dart';
 import 'package:loyalty_card_app/features/card_management/screens/card_list_screen.dart';
 import 'package:loyalty_card_app/core/theme/app_theme.dart';
 
@@ -24,7 +26,12 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Loyalty Card App',
       theme: AppTheme.lightTheme,
-      home: const CardListScreen(),
+      initialRoute: '/login',
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/signup': (context) => const SignupScreen(),
+        '/home': (context) => const CardListScreen(),
+      },
     );
   }
 }
